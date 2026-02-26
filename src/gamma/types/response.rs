@@ -499,6 +499,7 @@ pub struct Market {
     pub pager_duty_notification_enabled: Option<bool>,
     pub approved: Option<bool>,
     pub cyom: Option<bool>,
+    pub fee_type: Option<String>,
     pub fees_enabled: Option<bool>,
     pub holding_rewards_enabled: Option<bool>,
     pub neg_risk: Option<bool>,
@@ -516,7 +517,6 @@ pub struct Market {
     pub clob_rewards: Option<Vec<ClobReward>>,
     pub category_mailchimp_tag: Option<String>,
     pub subcategory: Option<String>,
-    pub fee_type: Option<String>,
 }
 
 /// CLOB rewards configuration for a market.
