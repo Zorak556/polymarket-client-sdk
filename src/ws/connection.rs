@@ -313,8 +313,10 @@ where
             }
         }
 
-        // Cleanup
+        // Cleanup: send a WebSocket Close frame (best-effort) to avoid half-open
+        // TCP sockets that linger until the OS keepalive timeout expires.
         heartbeat_handle.abort();
+        let _ = write.send(Message::Close(None)).await;
 
         Ok(())
     }
