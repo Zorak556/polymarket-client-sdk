@@ -65,6 +65,10 @@ struct ClientInner<S: State> {
     connection: ConnectionManager<RtdsMessage, SimpleParser>,
     /// Subscription manager for handling subscriptions
     subscriptions: Arc<SubscriptionManager>,
+    /// Handle to the reconnection handler task. Aborted on drop to break the
+    /// `Arc<SubscriptionManager>` cycle that would otherwise leak the
+    /// `ConnectionManager` and its background tasks.
+    reconnection_handle: tokio::task::JoinHandle<()>,
 }
 
 impl Client<Unauthenticated> {
@@ -74,7 +78,7 @@ impl Client<Unauthenticated> {
         let subscriptions = Arc::new(SubscriptionManager::new(connection.clone()));
 
         // Start reconnection handler to re-subscribe on connection recovery
-        subscriptions.start_reconnection_handler();
+        let reconnection_handle = subscriptions.start_reconnection_handler();
 
         Ok(Self {
             inner: Arc::new(ClientInner {
@@ -83,6 +87,7 @@ impl Client<Unauthenticated> {
                 endpoint: endpoint.to_owned(),
                 connection,
                 subscriptions,
+                reconnection_handle,
             }),
         })
     }
@@ -110,6 +115,7 @@ impl Client<Unauthenticated> {
                 endpoint: inner.endpoint,
                 connection: inner.connection,
                 subscriptions: inner.subscriptions,
+                reconnection_handle: inner.reconnection_handle,
             }),
         })
     }
@@ -325,7 +331,17 @@ impl Client<Authenticated<Normal>> {
                 endpoint: inner.endpoint,
                 connection: inner.connection,
                 subscriptions: inner.subscriptions,
+                reconnection_handle: inner.reconnection_handle,
             }),
         })
+    }
+}
+
+impl<S: State> Drop for ClientInner<S> {
+    fn drop(&mut self) {
+        // Abort the reconnection handler to release its Arc<SubscriptionManager>.
+        // This allows SubscriptionManager (and its ConnectionManager clone) to drop,
+        // which closes sender_tx and signals connection_loop to exit.
+        self.reconnection_handle.abort();
     }
 }

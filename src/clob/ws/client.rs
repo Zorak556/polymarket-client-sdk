@@ -622,6 +622,10 @@ impl<S: State> ClientInner<S> {
 struct ChannelResources {
     connection: ConnectionManager<WsMessage, Arc<InterestTracker>>,
     subscriptions: Arc<SubscriptionManager>,
+    /// Handle to the reconnection handler task. Aborted on drop to break the
+    /// `Arc<SubscriptionManager>` cycle that would otherwise leak the
+    /// `ConnectionManager` and its background tasks.
+    reconnection_handle: tokio::task::JoinHandle<()>,
 }
 
 impl ChannelResources {
@@ -630,16 +634,26 @@ impl ChannelResources {
         let connection = ConnectionManager::new(endpoint, config, Arc::clone(&interest))?;
         let subscriptions = Arc::new(SubscriptionManager::new(connection.clone(), interest));
 
-        subscriptions.start_reconnection_handler();
+        let reconnection_handle = subscriptions.start_reconnection_handler();
 
         Ok(Self {
             connection,
             subscriptions,
+            reconnection_handle,
         })
     }
 
     fn connection_state(&self) -> ConnectionState {
         self.connection.state()
+    }
+}
+
+impl Drop for ChannelResources {
+    fn drop(&mut self) {
+        // Abort the reconnection handler to release its Arc<SubscriptionManager>.
+        // This allows SubscriptionManager (and its ConnectionManager clone) to drop,
+        // which closes sender_tx and signals connection_loop to exit.
+        self.reconnection_handle.abort();
     }
 }
 
