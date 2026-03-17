@@ -134,7 +134,7 @@ impl Client<Unauthenticated> {
 
         Ok(stream.filter_map(|msg_result| async move {
             match msg_result {
-                Ok(msg) => msg.as_comment().map(Ok),
+                Ok(msg) => msg.into_comment().map(Ok),
                 Err(e) => Some(Err(e)),
             }
         }))
@@ -189,7 +189,7 @@ impl<S: State> Client<S> {
 
         Ok(stream.filter_map(|msg_result| async move {
             match msg_result {
-                Ok(msg) => msg.as_crypto_price().map(Ok),
+                Ok(msg) => msg.into_crypto_price().map(Ok),
                 Err(e) => Some(Err(e)),
             }
         }))
@@ -205,7 +205,7 @@ impl<S: State> Client<S> {
 
         Ok(stream.filter_map(|msg_result| async move {
             match msg_result {
-                Ok(msg) => msg.as_chainlink_price().map(Ok),
+                Ok(msg) => msg.into_chainlink_price().map(Ok),
                 Err(e) => Some(Err(e)),
             }
         }))
@@ -312,7 +312,7 @@ impl Client<Authenticated<Normal>> {
 
         Ok(stream.filter_map(|msg_result| async move {
             match msg_result {
-                Ok(msg) => msg.as_comment().map(Ok),
+                Ok(msg) => msg.into_comment().map(Ok),
                 Err(e) => Some(Err(e)),
             }
         }))
