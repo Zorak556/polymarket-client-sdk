@@ -23,31 +23,28 @@ pub struct RtdsMessage {
 }
 
 impl RtdsMessage {
-    /// Try to extract the payload as a crypto price update.
-    #[must_use]
-    pub fn as_crypto_price(&self) -> Option<CryptoPrice> {
+    /// Try to extract the payload as a crypto price update, consuming the payload.
+    pub fn into_crypto_price(mut self) -> Option<CryptoPrice> {
         if self.topic == "crypto_prices" {
-            serde_json::from_value(self.payload.clone()).ok()
+            serde_json::from_value(std::mem::take(&mut self.payload)).ok()
         } else {
             None
         }
     }
 
-    /// Try to extract the payload as a Chainlink price update.
-    #[must_use]
-    pub fn as_chainlink_price(&self) -> Option<ChainlinkPrice> {
+    /// Try to extract the payload as a Chainlink price update, consuming the payload.
+    pub fn into_chainlink_price(mut self) -> Option<ChainlinkPrice> {
         if self.topic == "crypto_prices_chainlink" {
-            serde_json::from_value(self.payload.clone()).ok()
+            serde_json::from_value(std::mem::take(&mut self.payload)).ok()
         } else {
             None
         }
     }
 
-    /// Try to extract the payload as a comment event.
-    #[must_use]
-    pub fn as_comment(&self) -> Option<Comment> {
+    /// Try to extract the payload as a comment event, consuming the payload.
+    pub fn into_comment(mut self) -> Option<Comment> {
         if self.topic == "comments" {
-            serde_json::from_value(self.payload.clone()).ok()
+            serde_json::from_value(std::mem::take(&mut self.payload)).ok()
         } else {
             None
         }
@@ -202,7 +199,7 @@ mod tests {
         assert_eq!(msg.topic, "crypto_prices");
         assert_eq!(msg.msg_type, "update");
 
-        let price = msg.as_crypto_price().unwrap();
+        let price = msg.clone().into_crypto_price().unwrap();
         assert_eq!(price.symbol, "solusdt");
         assert_eq!(price.value, dec!(189.55));
     }
@@ -226,7 +223,7 @@ mod tests {
         let msg = &msgs[0];
         assert_eq!(msg.topic, "crypto_prices_chainlink");
 
-        let price = msg.as_chainlink_price().unwrap();
+        let price = msg.clone().into_chainlink_price().unwrap();
         assert_eq!(price.symbol, "eth/usd");
         assert_eq!(price.value, dec!(3456.78));
     }
@@ -265,7 +262,7 @@ mod tests {
         assert_eq!(msg.topic, "comments");
         assert_eq!(msg.msg_type, "comment_created");
 
-        let comment = msg.as_comment().unwrap();
+        let comment = msg.clone().into_comment().unwrap();
         assert_eq!(comment.id, "1763355");
         assert_eq!(comment.body, "Test comment");
         assert_eq!(comment.profile.name, "salted.caramel");

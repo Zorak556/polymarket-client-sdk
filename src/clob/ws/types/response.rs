@@ -505,8 +505,8 @@ pub fn parse_if_interested(
         }
     };
 
-    match &value {
-        Value::Object(map) => {
+    match value {
+        Value::Object(ref map) => {
             // Single message: check event_type before full deserialization
             let event_type = map.get("event_type").and_then(Value::as_str);
 
@@ -521,20 +521,22 @@ pub fn parse_if_interested(
             }
         }
         Value::Array(arr) => Ok(arr
-            .iter()
+            .into_iter()
             .filter_map(|elem| {
-                let obj = elem.as_object()?;
-                let event_type = obj.get("event_type").and_then(Value::as_str)?;
+                let dominated = elem
+                    .get("event_type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|et| interest.is_interested_in_event(et));
 
-                if !interest.is_interested_in_event(event_type) {
+                if !dominated {
                     return None;
                 }
 
-                serde_json::from_value(elem.clone())
+                // Owns elem — no clone needed
+                serde_json::from_value(elem)
                     .inspect_err(|err| {
                         #[cfg(feature = "tracing")]
                         warn!(
-                            event_type = %event_type,
                             error = %err,
                             "Skipping unknown/invalid WS event in batch"
                         );
