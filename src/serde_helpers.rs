@@ -116,14 +116,13 @@ impl serde_with::SerializeAs<String> for StringFromAny {
 pub fn deserialize_with_warnings<T: DeserializeOwned>(value: Value) -> crate::Result<T> {
     use std::any::type_name;
 
+    let json = value.to_string();
+
     tracing::trace!(
         type_name = %type_name::<T>(),
-        json = %value,
+        json = %json,
         "deserializing JSON"
     );
-
-    // Clone the value so we can look up unknown field values later
-    let original = value.clone();
 
     // Collect unknown field paths during deserialization
     let mut unknown_paths: Vec<String> = Vec::new();
@@ -133,12 +132,12 @@ pub fn deserialize_with_warnings<T: DeserializeOwned>(value: Value) -> crate::Re
     })
     .inspect_err(|_| {
         // Re-deserialize with serde_path_to_error to get the error path
-        let json_str = original.to_string();
-        let jd = &mut serde_json::Deserializer::from_str(&json_str);
+        let jd = &mut serde_json::Deserializer::from_str(&json);
         let path_result: Result<T, _> = serde_path_to_error::deserialize(jd);
         if let Err(path_err) = path_result {
             let path = path_err.path().to_string();
             let inner_error = path_err.inner();
+            let original: Value = serde_json::from_str(&json).unwrap_or(Value::Null);
             let value_at_path = lookup_value(&original, &path);
             let value_display = format_value(value_at_path);
 
@@ -155,6 +154,7 @@ pub fn deserialize_with_warnings<T: DeserializeOwned>(value: Value) -> crate::Re
     // Log warnings for unknown fields with their values
     if !unknown_paths.is_empty() {
         let type_name = type_name::<T>();
+        let original: Value = serde_json::from_str(&json).unwrap_or(Value::Null);
         for path in unknown_paths {
             let field_value = lookup_value(&original, &path);
             let value_display = format_value(field_value);

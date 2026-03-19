@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::time::Instant;
 
 use backoff::backoff::Backoff as _;
-use futures::{SinkExt as _, StreamExt as _};
+use futures::{FutureExt as _, SinkExt as _, StreamExt as _};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpStream;
@@ -27,7 +27,34 @@ use crate::{Result, error::Error};
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Broadcast channel capacity for incoming messages.
-const BROADCAST_CAPACITY: usize = 1024;
+const DEFAULT_BROADCAST_CAPACITY: usize = 1024;
+
+fn broadcast_capacity() -> usize {
+    match std::env::var("POLYMARKET_WS_BROADCAST_CAPACITY") {
+        Ok(raw) => match raw.parse::<usize>() {
+            Ok(capacity) if capacity > 0 => capacity,
+            _ => {
+                #[cfg(feature = "tracing")]
+                tracing::warn!(
+                    value = %raw,
+                    default = DEFAULT_BROADCAST_CAPACITY,
+                    "invalid POLYMARKET_WS_BROADCAST_CAPACITY; using default"
+                );
+                DEFAULT_BROADCAST_CAPACITY
+            }
+        },
+        Err(std::env::VarError::NotPresent) => DEFAULT_BROADCAST_CAPACITY,
+        Err(error) => {
+            #[cfg(feature = "tracing")]
+            tracing::warn!(
+                %error,
+                default = DEFAULT_BROADCAST_CAPACITY,
+                "unable to read POLYMARKET_WS_BROADCAST_CAPACITY; using default"
+            );
+            DEFAULT_BROADCAST_CAPACITY
+        }
+    }
+}
 
 /// Connection state tracking.
 #[non_exhaustive]
@@ -116,7 +143,7 @@ where
     /// handles reconnection according to the config's `ReconnectConfig`.
     pub fn new(endpoint: String, config: Config, parser: P) -> Result<Self> {
         let (sender_tx, sender_rx) = mpsc::channel(64);
-        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
+        let (broadcast_tx, _) = broadcast::channel(broadcast_capacity());
         let (state_tx, state_rx) = watch::channel(ConnectionState::Disconnected);
 
         // Spawn connection task
@@ -126,15 +153,24 @@ where
         let state_tx_clone = state_tx.clone();
 
         tokio::spawn(async move {
-            Self::connection_loop(
-                connection_endpoint,
-                connection_config,
-                sender_rx,
-                broadcast_tx_clone,
-                parser,
-                state_tx_clone,
-            )
+            let result = std::panic::AssertUnwindSafe(async move {
+                Self::connection_loop(
+                    connection_endpoint,
+                    connection_config,
+                    sender_rx,
+                    broadcast_tx_clone,
+                    parser,
+                    state_tx_clone,
+                )
+                .await;
+            })
+            .catch_unwind()
             .await;
+
+            if result.is_err() {
+                #[cfg(feature = "tracing")]
+                tracing::error!("WebSocket connection task panicked");
+            }
         });
 
         Ok(Self {

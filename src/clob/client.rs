@@ -229,13 +229,13 @@ impl<S: Signer, K: Kind> AuthenticationBuilder<'_, S, K> {
                 salt_generator: self.salt_generator.unwrap_or(generate_seed),
                 server_time_offset: AtomicI64::new(inner.server_time_offset.load(Ordering::Relaxed)),
                 server_time_calibrated: AtomicBool::new(inner.server_time_calibrated.load(Ordering::Relaxed)),
+                #[cfg(feature = "heartbeats")]
+                heartbeat_token: tokio::sync::Mutex::new(DroppingCancellationToken(None)),
             }),
-            #[cfg(feature = "heartbeats")]
-            heartbeat_token: DroppingCancellationToken(None),
         };
 
         #[cfg(feature = "heartbeats")]
-        Client::<Authenticated<K>>::start_heartbeats(&mut client)?;
+        Client::<Authenticated<K>>::start_heartbeats(&mut client).await?;
 
         Ok(client)
     }
@@ -299,10 +299,6 @@ impl<S: Signer, K: Kind> AuthenticationBuilder<'_, S, K> {
 #[derive(Clone, Debug)]
 pub struct Client<S: State = Unauthenticated> {
     inner: Arc<ClientInner<S>>,
-    #[cfg(feature = "heartbeats")]
-    /// When the `heartbeats` feature is enabled, the authenticated [`Client`] will automatically
-    /// send heartbeats at the default cadence. See [`Config`] for more details.
-    heartbeat_token: DroppingCancellationToken,
 }
 
 #[cfg(feature = "heartbeats")]
@@ -362,7 +358,7 @@ impl Default for Client<Unauthenticated> {
 }
 
 /// Configuration for [`Client`]
-#[derive(Clone, Debug, Default, Builder)]
+#[derive(Clone, Debug, Builder)]
 pub struct Config {
     /// Whether the [`Client`] will use the server time provided by Polymarket when creating auth
     /// headers. This adds another round trip to the requests.
@@ -376,6 +372,17 @@ pub struct Config {
     #[builder(default = Duration::from_secs(5))]
     /// How often the [`Client`] will automatically submit heartbeats. The default is five (5) seconds.
     heartbeat_interval: Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            use_server_time: false,
+            geoblock_host: None,
+            #[cfg(feature = "heartbeats")]
+            heartbeat_interval: Duration::from_secs(5),
+        }
+    }
 }
 
 /// The default geoblock API host (separate from CLOB host)
@@ -411,6 +418,8 @@ struct ClientInner<S: State> {
     server_time_offset: AtomicI64,
     /// Whether [`server_time_offset`] has been calibrated.
     server_time_calibrated: AtomicBool,
+    #[cfg(feature = "heartbeats")]
+    heartbeat_token: tokio::sync::Mutex<DroppingCancellationToken>,
 }
 
 impl<S: State> ClientInner<S> {
@@ -590,6 +599,23 @@ impl<S: State> Client<S> {
         )
         .await?;
         drop((fee, tick, neg));
+        Ok(())
+    }
+
+    /// Pre-fetches and caches `fee_rate_bps`, `tick_size`, and `neg_risk` for a market
+    /// (pair of tokens) with only one set of HTTP requests. Both tokens in a binary
+    /// market share the same fee rate, tick size, and neg risk — so we fetch for the
+    /// first token and seed the cache for the second.
+    pub async fn prefetch_market(&self, token_a: U256, token_b: U256) -> Result<()> {
+        let (fee, tick, neg) = futures::future::try_join3(
+            self.fee_rate_bps(token_a),
+            self.tick_size(token_a),
+            self.neg_risk(token_a),
+        )
+        .await?;
+        self.set_fee_rate_bps(token_b, fee.base_fee);
+        self.set_tick_size(token_b, tick.minimum_tick_size);
+        self.set_neg_risk(token_b, neg.neg_risk);
         Ok(())
     }
 
@@ -1261,9 +1287,9 @@ impl Client<Unauthenticated> {
                 salt_generator: generate_seed,
                 server_time_offset: AtomicI64::new(0),
                 server_time_calibrated: AtomicBool::new(false),
+                #[cfg(feature = "heartbeats")]
+                heartbeat_token: tokio::sync::Mutex::new(DroppingCancellationToken(None)),
             }),
-            #[cfg(feature = "heartbeats")]
-            heartbeat_token: DroppingCancellationToken(None),
         })
     }
 
@@ -1353,9 +1379,9 @@ impl<K: Kind> Client<Authenticated<K>> {
             reason = "Nothing to await or modify when heartbeats are disabled"
         )
     )]
-    pub async fn deauthenticate(mut self) -> Result<Client<Unauthenticated>> {
+    pub async fn deauthenticate(self) -> Result<Client<Unauthenticated>> {
         #[cfg(feature = "heartbeats")]
-        self.heartbeat_token.cancel_and_wait().await?;
+        self.inner.heartbeat_token.lock().await.cancel_and_wait().await?;
 
         let inner = Arc::into_inner(self.inner).ok_or(Synchronization)?;
 
@@ -1375,9 +1401,9 @@ impl<K: Kind> Client<Authenticated<K>> {
                 salt_generator: generate_seed,
                 server_time_offset: AtomicI64::new(inner.server_time_offset.load(Ordering::Relaxed)),
                 server_time_calibrated: AtomicBool::new(inner.server_time_calibrated.load(Ordering::Relaxed)),
+                #[cfg(feature = "heartbeats")]
+                heartbeat_token: tokio::sync::Mutex::new(DroppingCancellationToken(None)),
             }),
-            #[cfg(feature = "heartbeats")]
-            heartbeat_token: DroppingCancellationToken(None),
         })
     }
 
@@ -2060,8 +2086,8 @@ impl<K: Kind> Client<Authenticated<K>> {
     /// Returns `true` if the heartbeat background task is running, `false` otherwise.
     /// Requires the `heartbeats` feature to be enabled.
     #[must_use]
-    pub fn heartbeats_active(&self) -> bool {
-        self.heartbeat_token.0.is_some()
+    pub async fn heartbeats_active(&self) -> bool {
+        self.inner.heartbeat_token.lock().await.0.is_some()
     }
 
     #[cfg(feature = "heartbeats")]
@@ -2078,8 +2104,8 @@ impl<K: Kind> Client<Authenticated<K>> {
     /// # Note
     ///
     /// Requires the `heartbeats` feature to be enabled.
-    pub fn start_heartbeats(client: &mut Client<Authenticated<K>>) -> Result<()> {
-        if client.heartbeats_active() {
+    pub async fn start_heartbeats(client: &mut Client<Authenticated<K>>) -> Result<()> {
+        if client.heartbeats_active().await {
             return Err(Error::validation("Unable to create another heartbeat task"));
         }
 
@@ -2124,7 +2150,7 @@ impl<K: Kind> Client<Authenticated<K>> {
             tx.send(())
         });
 
-        client.heartbeat_token = DroppingCancellationToken(Some((token, Arc::new(rx))));
+        *client.inner.heartbeat_token.lock().await = DroppingCancellationToken(Some((token, Arc::new(rx))));
 
         Ok(())
     }
@@ -2143,7 +2169,7 @@ impl<K: Kind> Client<Authenticated<K>> {
     ///
     /// Requires the `heartbeats` feature to be enabled.
     pub async fn stop_heartbeats(&mut self) -> Result<()> {
-        self.heartbeat_token.cancel_and_wait().await
+        self.inner.heartbeat_token.lock().await.cancel_and_wait().await
     }
 
     async fn create_headers(&self, request: &Request) -> Result<HeaderMap> {
@@ -2176,8 +2202,6 @@ impl<K: Kind> Client<Authenticated<K>> {
             post_only: Some(false),
             client: Client {
                 inner: Arc::clone(&self.inner),
-                #[cfg(feature = "heartbeats")]
-                heartbeat_token: self.heartbeat_token.clone(),
             },
             _kind: PhantomData,
         }
@@ -2200,11 +2224,11 @@ impl Client<Authenticated<Normal>> {
         )
     )]
     pub async fn promote_to_builder(
-        mut self,
+        self,
         config: BuilderConfig,
     ) -> Result<Client<Authenticated<Builder>>> {
         #[cfg(feature = "heartbeats")]
-        self.heartbeat_token.cancel_and_wait().await?;
+        self.inner.heartbeat_token.lock().await.cancel_and_wait().await?;
 
         let inner = Arc::into_inner(self.inner).ok_or(Synchronization)?;
 
@@ -2231,6 +2255,8 @@ impl Client<Authenticated<Normal>> {
             salt_generator: inner.salt_generator,
             server_time_offset: AtomicI64::new(inner.server_time_offset.load(Ordering::Relaxed)),
             server_time_calibrated: AtomicBool::new(inner.server_time_calibrated.load(Ordering::Relaxed)),
+            #[cfg(feature = "heartbeats")]
+            heartbeat_token: tokio::sync::Mutex::new(DroppingCancellationToken(None)),
         };
 
         #[cfg_attr(
@@ -2242,12 +2268,10 @@ impl Client<Authenticated<Normal>> {
         )]
         let mut client = Client {
             inner: Arc::new(new_inner),
-            #[cfg(feature = "heartbeats")]
-            heartbeat_token: DroppingCancellationToken(None),
         };
 
         #[cfg(feature = "heartbeats")]
-        Client::<Authenticated<Builder>>::start_heartbeats(&mut client)?;
+        Client::<Authenticated<Builder>>::start_heartbeats(&mut client).await?;
 
         Ok(client)
     }
