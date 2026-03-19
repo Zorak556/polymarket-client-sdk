@@ -414,21 +414,22 @@ impl<K: AuthKind> OrderBuilder<Market, K> {
         let raw_amount = amount.as_inner();
 
         let (taker_amount, maker_amount) = match (side, amount.0) {
-            // Spend USDC to buy shares
+            // Spend USDC to buy shares — maker is USDC (2dp), taker is shares (4dp)
             (Side::Buy, AmountInner::Usdc(_)) => {
                 let shares = (raw_amount / price).trunc_with_scale(decimals + LOT_SIZE_SCALE);
-                (shares, raw_amount)
+                let usdc = raw_amount.trunc_with_scale(LOT_SIZE_SCALE);
+                (shares, usdc)
             }
 
-            // Buy N shares: use cutoff `price` derived from ask depth
+            // Buy N shares — taker is shares (lot size), maker is USDC (2dp)
             (Side::Buy, AmountInner::Shares(_)) => {
-                let usdc = (raw_amount * price).trunc_with_scale(decimals + LOT_SIZE_SCALE);
+                let usdc = (raw_amount * price).trunc_with_scale(LOT_SIZE_SCALE);
                 (raw_amount, usdc)
             }
 
-            // Sell N shares for USDC
+            // Sell N shares for USDC — taker is USDC (2dp), maker is shares
             (Side::Sell, AmountInner::Shares(_)) => {
-                let usdc = (raw_amount * price).trunc_with_scale(decimals + LOT_SIZE_SCALE);
+                let usdc = (raw_amount * price).trunc_with_scale(LOT_SIZE_SCALE);
                 (usdc, raw_amount)
             }
 
