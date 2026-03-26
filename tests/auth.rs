@@ -10,6 +10,7 @@ use httpmock::MockServer;
 use polymarket_client_sdk::POLYGON;
 use polymarket_client_sdk::auth::{Credentials, ExposeSecret as _};
 use polymarket_client_sdk::clob::{Client, Config};
+use polymarket_client_sdk::clob::types::SignatureType;
 use polymarket_client_sdk::error::{Kind, Synchronization, Validation};
 use reqwest::StatusCode;
 use serde_json::json;
@@ -212,7 +213,7 @@ async fn create_or_derive_api_key_should_succeed() -> anyhow::Result<()> {
         }));
     });
 
-    let credentials = client.create_or_derive_api_key(&signer, None).await?;
+    let credentials = client.create_or_derive_api_key(&signer, None, SignatureType::Eoa).await?;
 
     assert_eq!(credentials.key(), API_KEY);
     mock.assert();
@@ -228,7 +229,7 @@ async fn create_or_derive_api_key_should_propagate_network_errors() -> anyhow::R
     let client = Client::new("http://127.0.0.1:1", Config::default())?;
 
     let err = client
-        .create_or_derive_api_key(&signer, None)
+        .create_or_derive_api_key(&signer, None, SignatureType::Eoa)
         .await
         .expect_err("should fail with network error");
 

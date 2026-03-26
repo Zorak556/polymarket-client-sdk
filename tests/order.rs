@@ -2058,7 +2058,7 @@ mod market {
             assert_eq!(signable_order.order.taker, Address::ZERO);
             assert_eq!(signable_order.order.tokenId, token_1());
             assert_eq!(signable_order.order.makerAmount, U256::from(100_000_000));
-            assert_eq!(signable_order.order.takerAmount, U256::from(1_785_714_280));
+            assert_eq!(signable_order.order.takerAmount, U256::from(1_785_714_200));
             assert_eq!(signable_order.order.expiration, U256::from(0));
             assert_eq!(signable_order.order.nonce, U256::from(123));
             assert_eq!(signable_order.order.feeRateBps, U256::ZERO);
@@ -2109,7 +2109,7 @@ mod market {
             assert_eq!(signable_order.order.makerAmount, U256::from(100_000_000));
             assert_eq!(
                 signable_order.order.takerAmount,
-                U256::from(17_857_142_857_u64)
+                U256::from(17_857_142_800_u64)
             );
             assert_eq!(signable_order.order.expiration, U256::from(0));
             assert_eq!(signable_order.order.nonce, U256::from(123));

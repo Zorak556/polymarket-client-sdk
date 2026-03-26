@@ -311,6 +311,7 @@ where
                         }
                         Ok(Message::Close(_)) => {
                             heartbeat_handle.abort();
+                            let _ = write.send(Message::Close(None)).await;
                             return Err(Error::with_source(
                                 Kind::WebSocket,
                                 WsError::ConnectionClosed,
@@ -318,6 +319,7 @@ where
                         }
                         Err(e) => {
                             heartbeat_handle.abort();
+                            let _ = write.send(Message::Close(None)).await;
                             return Err(Error::with_source(
                                 Kind::WebSocket,
                                 WsError::Connection(e),

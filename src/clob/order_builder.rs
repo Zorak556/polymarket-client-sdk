@@ -22,6 +22,11 @@ pub(crate) const USDC_DECIMALS: u32 = 6;
 /// Maximum number of decimal places for `size`
 pub(crate) const LOT_SIZE_SCALE: u32 = 2;
 
+/// Maker amount max accuracy (2 decimal places)
+const MAKER_SCALE: u32 = 2;
+/// Taker amount max accuracy (4 decimal places)
+const TAKER_SCALE: u32 = 4;
+
 /// Placeholder type for compile-time checks on limit order builders
 #[non_exhaustive]
 #[derive(Debug)]
@@ -416,21 +421,23 @@ impl<K: AuthKind> OrderBuilder<Market, K> {
         let (taker_amount, maker_amount) = match (side, amount.0) {
             // Spend USDC to buy shares — maker is USDC (2dp), taker is shares (4dp)
             (Side::Buy, AmountInner::Usdc(_)) => {
-                let shares = (raw_amount / price).trunc_with_scale(decimals + LOT_SIZE_SCALE);
-                let usdc = raw_amount.trunc_with_scale(LOT_SIZE_SCALE);
+                let shares = (raw_amount / price).trunc_with_scale(TAKER_SCALE);
+                let usdc = raw_amount.trunc_with_scale(MAKER_SCALE);
                 (shares, usdc)
             }
 
-            // Buy N shares — taker is shares (lot size), maker is USDC (2dp)
+            // Buy N shares — taker is shares (4dp), maker is USDC (2dp)
             (Side::Buy, AmountInner::Shares(_)) => {
-                let usdc = (raw_amount * price).trunc_with_scale(LOT_SIZE_SCALE);
-                (raw_amount, usdc)
+                let usdc = (raw_amount * price).trunc_with_scale(MAKER_SCALE);
+                let shares = raw_amount.trunc_with_scale(TAKER_SCALE);
+                (shares, usdc)
             }
 
-            // Sell N shares for USDC — taker is USDC (2dp), maker is shares
+            // Sell N shares for USDC — taker is USDC (2dp), maker is shares (4dp)
             (Side::Sell, AmountInner::Shares(_)) => {
-                let usdc = (raw_amount * price).trunc_with_scale(LOT_SIZE_SCALE);
-                (usdc, raw_amount)
+                let usdc = (raw_amount * price).trunc_with_scale(TAKER_SCALE);
+                let shares = raw_amount.trunc_with_scale(MAKER_SCALE);
+                (usdc, shares)
             }
 
             (Side::Sell, AmountInner::Usdc(_)) => {
