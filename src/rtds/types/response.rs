@@ -153,23 +153,52 @@ pub enum CommentType {
 ///
 /// Handles both single objects and arrays of messages.
 /// Returns an empty vector for empty or whitespace-only input.
+///
+/// Control and error messages from the server (e.g. `{"message": "Invalid request body"}`)
+/// that lack a `topic` field are silently skipped rather than causing a parse failure.
 pub fn parse_messages(bytes: &[u8]) -> crate::Result<Vec<RtdsMessage>> {
-    // Handle empty or whitespace-only input (server keepalive messages)
-    let trimmed = bytes
-        .iter()
-        .position(|b| !b.is_ascii_whitespace())
-        .map_or(&[][..], |start| &bytes[start..]);
+    // Parse JSON once into Value. The server sends plain-text control messages
+    // and keepalives that aren't JSON — treat them as empty.
+    let value: Value = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => {
+            #[cfg(feature = "tracing")]
+            tracing::debug!(
+                text = %String::from_utf8_lossy(bytes),
+                "Ignoring non-JSON RTDS WebSocket message"
+            );
+            return Ok(vec![]);
+        }
+    };
 
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // Try parsing as array first, fall back to single object
-    if trimmed.first() == Some(&b'[') {
-        Ok(serde_json::from_slice(trimmed)?)
-    } else {
-        let msg: RtdsMessage = serde_json::from_slice(trimmed)?;
-        Ok(vec![msg])
+    match value {
+        Value::Object(ref map) => {
+            if !map.contains_key("topic") {
+                #[cfg(feature = "tracing")]
+                tracing::debug!(?map, "Skipping RTDS message without topic field");
+                return Ok(vec![]);
+            }
+            let msg: RtdsMessage = serde_json::from_value(value)?;
+            Ok(vec![msg])
+        }
+        Value::Array(arr) => Ok(arr
+            .into_iter()
+            .filter_map(|elem| {
+                if elem.get("topic").and_then(Value::as_str).is_none() {
+                    return None;
+                }
+                serde_json::from_value(elem)
+                    .inspect_err(|_err| {
+                        #[cfg(feature = "tracing")]
+                        tracing::warn!(
+                            error = %_err,
+                            "Skipping invalid RTDS message in batch"
+                        );
+                    })
+                    .ok()
+            })
+            .collect()),
+        _ => Ok(vec![]),
     }
 }
 
@@ -296,5 +325,54 @@ mod tests {
     fn parse_whitespace_only_input() {
         let msgs = parse_messages(b"   \n\t  ").unwrap();
         assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn parse_error_control_message_returns_empty() {
+        let json = r#"{"message": "Invalid request body", "connectionId": "abc", "requestId": "def"}"#;
+        let msgs = parse_messages(json.as_bytes()).unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn parse_non_json_input_returns_empty() {
+        let msgs = parse_messages(b"not json at all").unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn parse_primitive_json_returns_empty() {
+        let msgs = parse_messages(b"null").unwrap();
+        assert!(msgs.is_empty());
+
+        let msgs = parse_messages(b"42").unwrap();
+        assert!(msgs.is_empty());
+
+        let msgs = parse_messages(b"true").unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn parse_array_skips_messages_without_topic() {
+        let json = r#"[
+            {
+                "topic": "crypto_prices",
+                "type": "update",
+                "timestamp": 1753314064237,
+                "payload": {
+                    "symbol": "btcusdt",
+                    "timestamp": 1753314064213,
+                    "value": 67234.50
+                }
+            },
+            {
+                "message": "Internal error",
+                "connectionId": "xyz"
+            }
+        ]"#;
+
+        let msgs = parse_messages(json.as_bytes()).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].topic, "crypto_prices");
     }
 }

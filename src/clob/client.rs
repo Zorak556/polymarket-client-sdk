@@ -196,7 +196,11 @@ impl<S: Signer, K: Kind> AuthenticationBuilder<'_, S, K> {
             Some(credentials) => credentials,
             None => {
                 inner
-                    .create_or_derive_api_key(self.signer, self.nonce)
+                    .create_or_derive_api_key(
+                        self.signer,
+                        self.nonce,
+                        self.signature_type.unwrap_or(SignatureType::Eoa),
+                    )
                     .await?
             }
         };
@@ -311,7 +315,7 @@ pub struct Client<S: State = Unauthenticated> {
 /// This way, the inner token is expressly cancelled when [`DroppingCancellationToken`] is dropped.
 /// We also have a [`Receiver<()>`] to notify when the inner [`Client`] has been dropped so that
 /// we can avoid a race condition when calling [`Arc::into_inner`] on promotion and demotion methods.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 struct DroppingCancellationToken(Option<(CancellationToken, Arc<Receiver<()>>)>);
 
 #[cfg(feature = "heartbeats")]
@@ -466,7 +470,16 @@ impl ClientInner<Unauthenticated> {
         &self,
         signer: &S,
         nonce: Option<u32>,
+        signature_type: SignatureType,
     ) -> Result<Credentials> {
+        // Proxy and GnosisSafe wallets cannot create API keys directly (the auth
+        // headers carry the EOA address, not the proxy address, so the server
+        // always returns 400). Skip straight to derive to avoid the spurious
+        // warning logged by `request()`.
+        if matches!(signature_type, SignatureType::Proxy | SignatureType::GnosisSafe) {
+            return self.derive_api_key(signer, nonce).await;
+        }
+
         match self.create_api_key(signer, nonce).await {
             Ok(creds) => Ok(creds),
             Err(err) if err.kind() == ErrorKind::Status => {
@@ -1364,8 +1377,11 @@ impl Client<Unauthenticated> {
         &self,
         signer: &S,
         nonce: Option<u32>,
+        signature_type: SignatureType,
     ) -> Result<Credentials> {
-        self.inner.create_or_derive_api_key(signer, nonce).await
+        self.inner
+            .create_or_derive_api_key(signer, nonce, signature_type)
+            .await
     }
 }
 

@@ -510,6 +510,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(any(feature = "bridge", feature = "clob", feature = "data", feature = "gamma"))]
     #[tokio::test]
     async fn builder_headers_should_succeed() -> Result<()> {
         let credentials = Credentials {

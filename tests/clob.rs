@@ -1564,7 +1564,7 @@ mod authenticated {
 
         assert_eq!(signed_order, expected);
         mock.assert();
-        mock2.assert_calls(2);
+        mock2.assert();
 
         Ok(())
     }
@@ -3157,7 +3157,7 @@ mod builder_authenticated {
                         "id": "1",
                         "tradeType": "limit",
                         "takerOrderHash": "0x0000000000000000000000000000000000000000000000000074616b65726f72",
-                        "builder": "0x00000000000000000000000000006275696c6431",
+                        "builder": "ffffffff-ffff-ffff-ffff-ffffffffffff",
                         "market": "0x000000000000000000000000000000000000000000000000000000006d61726b",
                         "assetId": token_1(),
                         "side": "buy",
@@ -3199,7 +3199,7 @@ mod builder_authenticated {
             .taker_order_hash(b256!(
                 "0000000000000000000000000000000000000000000000000074616b65726f72"
             ))
-            .builder(address!("00000000000000000000000000006275696c6431"))
+            .builder(Uuid::max())
             .market(b256!(
                 "000000000000000000000000000000000000000000000000000000006d61726b"
             ))
