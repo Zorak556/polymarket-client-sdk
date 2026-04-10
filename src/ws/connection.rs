@@ -193,6 +193,10 @@ where
     ) {
         let mut attempt = 0_u32;
         let mut backoff: backoff::ExponentialBackoff = config.reconnect.clone().into();
+        /// Minimum connection duration (5s) before resetting backoff.
+        /// If connection dies before this, treat it as a failed attempt to avoid
+        /// rapid reconnect loops burning CPU (issue #327).
+        const MIN_CONNECTION_LIFETIME: std::time::Duration = std::time::Duration::from_secs(5);
 
         loop {
             // Check if ConnectionManager was dropped (all sender_tx instances gone)
@@ -210,10 +214,9 @@ where
             // Attempt connection
             match connect_async(&endpoint).await {
                 Ok((ws_stream, _)) => {
-                    attempt = 0;
-                    backoff.reset();
+                    let connected_at = Instant::now();
                     _ = state_tx.send(ConnectionState::Connected {
-                        since: Instant::now(),
+                        since: connected_at,
                     });
 
                     // Handle connection
@@ -231,6 +234,17 @@ where
                         tracing::error!("Error handling connection: {e:?}");
                         #[cfg(not(feature = "tracing"))]
                         let _: &_ = &e;
+                    }
+
+                    // Only reset backoff if connection was alive for MIN_CONNECTION_LIFETIME.
+                    // If it died quickly (fast TCP RST, immediate 429, etc.), treat it as
+                    // a failed attempt to avoid exponential backoff reset and rapid CPU-burning
+                    // reconnect loops during rate limiting or instability.
+                    if connected_at.elapsed() >= MIN_CONNECTION_LIFETIME {
+                        attempt = 0;
+                        backoff.reset();
+                    } else {
+                        attempt = attempt.saturating_add(1);
                     }
                 }
                 Err(e) => {
