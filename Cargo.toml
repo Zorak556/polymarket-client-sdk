@@ -274,6 +274,11 @@ unseparated_literal_suffix = "warn"
 unused_trait_names = "warn"
 unwrap_used = "warn"
 
+[profile.release]
+lto = "thin"        # Link-Time Optimization: enables cross-crate inlining and reduces latency
+codegen-units = 1   # Single codegen unit allows more aggressive optimizations
+strip = true        # Strip symbols to reduce binary size
+
 [profile.bench]
 lto = "thin"        # Link-Time Optimization: enables cross-crate inlining
 codegen-units = 1   # Single codegen unit allows more aggressive optimizations
