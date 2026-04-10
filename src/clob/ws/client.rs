@@ -166,6 +166,27 @@ impl<S: State> Client<S> {
         }))
     }
 
+    /// Subscribe to both `book` snapshots and `price_change` deltas in a
+    /// single stream. Uses one broadcast receiver instead of two, avoiding
+    /// message lag from duplicate subscriptions.
+    pub fn subscribe_book_and_prices(
+        &self,
+        asset_ids: Vec<U256>,
+    ) -> Result<impl Stream<Item = Result<WsMessage>> + use<S>> {
+        let resources = self.inner.get_or_create_channel(ChannelType::Market)?;
+        let stream = resources.subscriptions.subscribe_market(asset_ids)?;
+
+        Ok(stream.filter_map(|msg_result| async move {
+            match msg_result {
+                Ok(msg @ WsMessage::Book(_)) | Ok(msg @ WsMessage::PriceChange(_)) => {
+                    Some(Ok(msg))
+                }
+                Err(e) => Some(Err(e)),
+                _ => None,
+            }
+        }))
+    }
+
     /// Subscribes to real-time last trade price updates for specified assets.
     ///
     /// Returns a stream of the most recent executed trade price for each asset.
@@ -444,7 +465,7 @@ impl<K: AuthKind> Client<Authenticated<K>> {
     /// # Note
     ///
     /// This method is only available on authenticated clients.
-    pub fn subscribe_user_events(
+    pub async fn subscribe_user_events(
         &self,
         markets: Vec<B256>,
     ) -> Result<impl Stream<Item = Result<WsMessage>> + use<K>> {
@@ -453,6 +474,7 @@ impl<K: AuthKind> Client<Authenticated<K>> {
         resources
             .subscriptions
             .subscribe_user(markets, &self.inner.state.credentials)
+            .await
     }
 
     /// Subscribes to real-time order status updates for the authenticated user.
@@ -472,11 +494,11 @@ impl<K: AuthKind> Client<Authenticated<K>> {
     /// # Note
     ///
     /// This method is only available on authenticated clients.
-    pub fn subscribe_orders(
+    pub async fn subscribe_orders(
         &self,
         markets: Vec<B256>,
     ) -> Result<impl Stream<Item = Result<OrderMessage>> + use<K>> {
-        let stream = self.subscribe_user_events(markets)?;
+        let stream = self.subscribe_user_events(markets).await?;
 
         Ok(stream.filter_map(|msg_result| async move {
             match msg_result {
@@ -505,11 +527,11 @@ impl<K: AuthKind> Client<Authenticated<K>> {
     /// # Note
     ///
     /// This method is only available on authenticated clients.
-    pub fn subscribe_trades(
+    pub async fn subscribe_trades(
         &self,
         markets: Vec<B256>,
     ) -> Result<impl Stream<Item = Result<TradeMessage>> + use<K>> {
-        let stream = self.subscribe_user_events(markets)?;
+        let stream = self.subscribe_user_events(markets).await?;
 
         Ok(stream.filter_map(|msg_result| async move {
             match msg_result {

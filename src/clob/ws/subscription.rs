@@ -5,7 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use std::time::Instant;
 
 use async_stream::try_stream;
@@ -130,7 +131,7 @@ impl SubscriptionManager {
                             // Reconnect to subscriptions
                             #[cfg(feature = "tracing")]
                             tracing::debug!("WebSocket reconnected, re-establishing subscriptions");
-                            this.resubscribe_all();
+                            this.resubscribe_all().await;
                         }
                         was_connected = true;
                     }
@@ -147,7 +148,7 @@ impl SubscriptionManager {
     }
 
     /// Re-send subscription requests for all tracked assets and markets.
-    fn resubscribe_all(&self) {
+    async fn resubscribe_all(&self) {
         // Collect all subscribed assets
         let assets: Vec<U256> = self.subscribed_assets.iter().map(|r| *r.key()).collect();
 
@@ -171,13 +172,7 @@ impl SubscriptionManager {
             }
         }
 
-        // Store auth for re-subscription on reconnect.
-        // We can recover from poisoned lock because Option<Credentials> has no inconsistent intermediate state.
-        let auth = self
-            .last_auth
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let auth = self.last_auth.read().await.clone();
         if let Some(auth) = auth {
             let markets: Vec<B256> = self.subscribed_markets.iter().map(|r| *r.key()).collect();
 
@@ -312,10 +307,14 @@ impl SubscriptionManager {
                         }
                     }
                     Err(RecvError::Lagged(n)) => {
-                        #[cfg(not(feature = "tracing"))]
-                        let _ = n;
                         #[cfg(feature = "tracing")]
-                        tracing::warn!("Subscription lagged, missed {n} messages — continuing");
+                        tracing::error!("Subscription lagged, missed {n} messages — forcing resubscribe");
+                        Err::<(), crate::error::Error>(
+                            WsError::SubscriptionFailed(format!(
+                                "market subscription lagged; missed {n} messages"
+                            ))
+                            .into(),
+                        )?;
                     }
                     Err(RecvError::Closed) => {
                         break;
@@ -326,7 +325,7 @@ impl SubscriptionManager {
     }
 
     /// Subscribe to authenticated user channel.
-    pub fn subscribe_user(
+    pub async fn subscribe_user(
         &self,
         markets: Vec<B256>,
         auth: &Credentials,
@@ -335,10 +334,7 @@ impl SubscriptionManager {
 
         // Store auth for re-subscription on reconnect.
         // We can recover from poisoned lock because Option<Credentials> has no inconsistent intermediate state.
-        *self
-            .last_auth
-            .write()
-            .unwrap_or_else(PoisonError::into_inner) = Some(auth.clone());
+        *self.last_auth.write().await = Some(auth.clone());
 
         // Increment refcounts and determine which markets are truly new
         let new_markets: Vec<B256> = markets
@@ -399,10 +395,14 @@ impl SubscriptionManager {
                         }
                     }
                     Err(RecvError::Lagged(n)) => {
-                        #[cfg(not(feature = "tracing"))]
-                        let _ = n;
                         #[cfg(feature = "tracing")]
-                        tracing::warn!("Subscription lagged, missed {n} messages — continuing");
+                        tracing::error!("Subscription lagged, missed {n} messages — forcing resubscribe");
+                        Err::<(), crate::error::Error>(
+                            WsError::SubscriptionFailed(format!(
+                                "user subscription lagged; missed {n} messages"
+                            ))
+                            .into(),
+                        )?;
                     }
                     Err(RecvError::Closed) => {
                         break;
@@ -534,11 +534,11 @@ impl SubscriptionManager {
                 "Unsubscribing from user markets"
             );
 
-            // Get auth for unsubscribe request
+            // Get auth for unsubscribe request (non-blocking — unsubscribe is infrequent).
             let auth = self
                 .last_auth
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
+                .try_read()
+                .map_err(|_| WsError::AuthenticationFailed)?
                 .clone()
                 .ok_or(WsError::AuthenticationFailed)?;
 

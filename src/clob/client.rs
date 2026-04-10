@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 #[cfg(feature = "heartbeats")]
 use std::time::Duration;
 
+use crate::HttpClient;
 use alloy::dyn_abi::Eip712Domain;
 use alloy::primitives::U256;
 use alloy::signers::Signer;
@@ -18,7 +19,6 @@ use futures::Stream;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Client as ReqwestClient, Method, Request};
 use serde_json::json;
-use crate::HttpClient;
 #[cfg(all(feature = "tracing", feature = "heartbeats"))]
 use tracing::{debug, error};
 use url::Url;
@@ -231,8 +231,12 @@ impl<S: Signer, K: Kind> AuthenticationBuilder<'_, S, K> {
                 funder,
                 signature_type: self.signature_type.unwrap_or(SignatureType::Eoa),
                 salt_generator: self.salt_generator.unwrap_or(generate_seed),
-                server_time_offset: AtomicI64::new(inner.server_time_offset.load(Ordering::Relaxed)),
-                server_time_calibrated: AtomicBool::new(inner.server_time_calibrated.load(Ordering::Relaxed)),
+                server_time_offset: AtomicI64::new(
+                    inner.server_time_offset.load(Ordering::Relaxed),
+                ),
+                server_time_calibrated: AtomicBool::new(
+                    inner.server_time_calibrated.load(Ordering::Relaxed),
+                ),
                 #[cfg(feature = "heartbeats")]
                 heartbeat_token: tokio::sync::Mutex::new(DroppingCancellationToken(None)),
             }),
@@ -372,6 +376,13 @@ pub struct Config {
     /// This is primarily useful for testing.
     #[builder(into)]
     geoblock_host: Option<String>,
+    /// A pre-configured [`reqwest::Client`] to use for HTTP requests. When provided,
+    /// the supplied client is used as-is — callers should include appropriate default
+    /// headers (e.g. `User-Agent`, `Content-Type: application/json`) on their client.
+    ///
+    /// If `None` (the default), the client builds a standard [`reqwest::Client`]
+    /// internally.
+    http_client: Option<ReqwestClient>,
     #[cfg(feature = "heartbeats")]
     #[builder(default = Duration::from_secs(5))]
     /// How often the [`Client`] will automatically submit heartbeats. The default is five (5) seconds.
@@ -383,6 +394,7 @@ impl Default for Config {
         Self {
             use_server_time: false,
             geoblock_host: None,
+            http_client: None,
             #[cfg(feature = "heartbeats")]
             heartbeat_interval: Duration::from_secs(5),
         }
@@ -476,7 +488,10 @@ impl ClientInner<Unauthenticated> {
         // headers carry the EOA address, not the proxy address, so the server
         // always returns 400). Skip straight to derive to avoid the spurious
         // warning logged by `request()`.
-        if matches!(signature_type, SignatureType::Proxy | SignatureType::GnosisSafe) {
+        if matches!(
+            signature_type,
+            SignatureType::Proxy | SignatureType::GnosisSafe
+        ) {
             return self.derive_api_key(signer, nonce).await;
         }
 
@@ -641,8 +656,12 @@ impl<S: State> Client<S> {
         let server_ts = self.inner.server_time().await?;
         let local_ts = Utc::now().timestamp();
         let offset = server_ts - local_ts;
-        self.inner.server_time_offset.store(offset, Ordering::Relaxed);
-        self.inner.server_time_calibrated.store(true, Ordering::Release);
+        self.inner
+            .server_time_offset
+            .store(offset, Ordering::Relaxed);
+        self.inner
+            .server_time_calibrated
+            .store(true, Ordering::Release);
 
         #[cfg(feature = "tracing")]
         tracing::info!(offset_secs = offset, "Server time offset calibrated");
@@ -1265,8 +1284,9 @@ impl Client<Unauthenticated> {
         headers.insert("Connection", HeaderValue::from_static("keep-alive"));
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
-        let client = crate::build_http_client(
-            ReqwestClient::builder()
+        let client = crate::build_http_client(match config.http_client.clone() {
+            Some(custom) => custom,
+            None => ReqwestClient::builder()
                 .default_headers(headers)
                 .tcp_nodelay(true)
                 .pool_idle_timeout(std::time::Duration::from_secs(90))
@@ -1276,7 +1296,7 @@ impl Client<Unauthenticated> {
                 .http2_adaptive_window(true)
                 .connect_timeout(std::time::Duration::from_secs(5))
                 .build()?,
-        );
+        });
 
         let geoblock_host = Url::parse(
             config
@@ -1397,7 +1417,12 @@ impl<K: Kind> Client<Authenticated<K>> {
     )]
     pub async fn deauthenticate(self) -> Result<Client<Unauthenticated>> {
         #[cfg(feature = "heartbeats")]
-        self.inner.heartbeat_token.lock().await.cancel_and_wait().await?;
+        self.inner
+            .heartbeat_token
+            .lock()
+            .await
+            .cancel_and_wait()
+            .await?;
 
         let inner = Arc::into_inner(self.inner).ok_or(Synchronization)?;
 
@@ -1415,8 +1440,12 @@ impl<K: Kind> Client<Authenticated<K>> {
                 funder: None,
                 signature_type: SignatureType::Eoa,
                 salt_generator: generate_seed,
-                server_time_offset: AtomicI64::new(inner.server_time_offset.load(Ordering::Relaxed)),
-                server_time_calibrated: AtomicBool::new(inner.server_time_calibrated.load(Ordering::Relaxed)),
+                server_time_offset: AtomicI64::new(
+                    inner.server_time_offset.load(Ordering::Relaxed),
+                ),
+                server_time_calibrated: AtomicBool::new(
+                    inner.server_time_calibrated.load(Ordering::Relaxed),
+                ),
                 #[cfg(feature = "heartbeats")]
                 heartbeat_token: tokio::sync::Mutex::new(DroppingCancellationToken(None)),
             }),
@@ -1652,7 +1681,7 @@ impl<K: Kind> Client<Authenticated<K>> {
         let request = self
             .client()
             .request(Method::DELETE, format!("{}order", self.host()))
-            .json(&json!({ "orderId": order_id }))
+            .json(&json!({ "orderID": order_id }))
             .build()?;
         let headers = self.create_headers(&request).await?;
 
@@ -2166,7 +2195,8 @@ impl<K: Kind> Client<Authenticated<K>> {
             tx.send(())
         });
 
-        *client.inner.heartbeat_token.lock().await = DroppingCancellationToken(Some((token, Arc::new(rx))));
+        *client.inner.heartbeat_token.lock().await =
+            DroppingCancellationToken(Some((token, Arc::new(rx))));
 
         Ok(())
     }
@@ -2185,7 +2215,12 @@ impl<K: Kind> Client<Authenticated<K>> {
     ///
     /// Requires the `heartbeats` feature to be enabled.
     pub async fn stop_heartbeats(&mut self) -> Result<()> {
-        self.inner.heartbeat_token.lock().await.cancel_and_wait().await
+        self.inner
+            .heartbeat_token
+            .lock()
+            .await
+            .cancel_and_wait()
+            .await
     }
 
     async fn create_headers(&self, request: &Request) -> Result<HeaderMap> {
@@ -2244,7 +2279,12 @@ impl Client<Authenticated<Normal>> {
         config: BuilderConfig,
     ) -> Result<Client<Authenticated<Builder>>> {
         #[cfg(feature = "heartbeats")]
-        self.inner.heartbeat_token.lock().await.cancel_and_wait().await?;
+        self.inner
+            .heartbeat_token
+            .lock()
+            .await
+            .cancel_and_wait()
+            .await?;
 
         let inner = Arc::into_inner(self.inner).ok_or(Synchronization)?;
 
@@ -2270,7 +2310,9 @@ impl Client<Authenticated<Normal>> {
             signature_type: inner.signature_type,
             salt_generator: inner.salt_generator,
             server_time_offset: AtomicI64::new(inner.server_time_offset.load(Ordering::Relaxed)),
-            server_time_calibrated: AtomicBool::new(inner.server_time_calibrated.load(Ordering::Relaxed)),
+            server_time_calibrated: AtomicBool::new(
+                inner.server_time_calibrated.load(Ordering::Relaxed),
+            ),
             #[cfg(feature = "heartbeats")]
             heartbeat_token: tokio::sync::Mutex::new(DroppingCancellationToken(None)),
         };

@@ -3,11 +3,14 @@
 //! When the `tracing` feature is enabled, this module also logs warnings for any
 //! unknown fields encountered during deserialization, helping detect API changes.
 
-#[cfg(any(
-    feature = "bridge",
-    feature = "clob",
-    feature = "data",
-    feature = "gamma",
+#[cfg(all(
+    any(feature = "tracing", test),
+    any(
+        feature = "bridge",
+        feature = "clob",
+        feature = "data",
+        feature = "gamma",
+    )
 ))]
 use {serde::de::DeserializeOwned, serde_json::Value};
 
@@ -171,8 +174,8 @@ pub fn deserialize_with_warnings<T: DeserializeOwned>(value: Value) -> crate::Re
     Ok(result)
 }
 
-/// Pass-through deserialization when tracing is disabled.
 #[cfg(all(
+    test,
     not(feature = "tracing"),
     any(
         feature = "bridge",

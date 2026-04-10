@@ -27,7 +27,7 @@ use crate::{Result, error::Error};
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Broadcast channel capacity for incoming messages.
-const DEFAULT_BROADCAST_CAPACITY: usize = 1024;
+const DEFAULT_BROADCAST_CAPACITY: usize = 16_384;
 
 fn broadcast_capacity() -> usize {
     match std::env::var("POLYMARKET_WS_BROADCAST_CAPACITY") {
