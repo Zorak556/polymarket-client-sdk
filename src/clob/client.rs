@@ -1637,7 +1637,7 @@ impl<K: Kind> Client<Authenticated<K>> {
     pub async fn order(&self, order_id: &str) -> Result<OpenOrderResponse> {
         let request = self
             .client()
-            .request(Method::GET, format!("{}data/order/{order_id}", self.host()))
+            .request(Method::GET, format!("{}order/{order_id}", self.host()))
             .build()?;
         let headers = self.create_headers(&request).await?;
 
@@ -1661,7 +1661,7 @@ impl<K: Kind> Client<Authenticated<K>> {
         let params = request.query_params(next_cursor.as_deref());
         let request = self
             .client()
-            .request(Method::GET, format!("{}data/orders{params}", self.host()))
+            .request(Method::GET, format!("{}orders{params}", self.host()))
             .build()?;
         let headers = self.create_headers(&request).await?;
 

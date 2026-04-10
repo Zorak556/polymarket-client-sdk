@@ -187,6 +187,7 @@ pub struct Trade {
     /// Trade side (BUY or SELL).
     pub side: Side,
     /// The outcome token asset identifier (decimal string from API).
+    #[serde_as(as = "DisplayFromStr")]
     pub asset: U256,
     /// The market condition ID (unique market identifier).
     pub condition_id: B256,

@@ -23,6 +23,9 @@ pub struct Config {
     pub heartbeat_timeout: Duration,
     /// Reconnection strategy configuration
     pub reconnect: ReconnectConfig,
+    /// Capacity of the internal broadcast channel for WS events.
+    /// Larger values provide more headroom for slow consumers at the cost of memory.
+    pub broadcast_capacity: usize,
 }
 
 impl Default for Config {
@@ -31,6 +34,7 @@ impl Default for Config {
             heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL_DURATION,
             heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT_DURATION,
             reconnect: ReconnectConfig::default(),
+            broadcast_capacity: 1024,
         }
     }
 }

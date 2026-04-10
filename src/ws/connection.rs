@@ -143,7 +143,7 @@ where
     /// handles reconnection according to the config's `ReconnectConfig`.
     pub fn new(endpoint: String, config: Config, parser: P) -> Result<Self> {
         let (sender_tx, sender_rx) = mpsc::channel(64);
-        let (broadcast_tx, _) = broadcast::channel(broadcast_capacity());
+        let (broadcast_tx, _) = broadcast::channel(config.broadcast_capacity);
         let (state_tx, state_rx) = watch::channel(ConnectionState::Disconnected);
 
         // Spawn connection task

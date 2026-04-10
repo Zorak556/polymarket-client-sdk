@@ -1702,7 +1702,7 @@ mod authenticated {
 
         let mock = server.mock(|when, then| {
             when.method(GET)
-                .path("/data/order/1")
+                .path("/order/1")
                 .header(POLY_ADDRESS, client.address().to_string().to_lowercase())
                 .header(POLY_API_KEY, API_KEY)
                 .header(POLY_PASSPHRASE, PASSPHRASE);
@@ -1772,7 +1772,7 @@ mod authenticated {
 
         let mock = server.mock(|when, then| {
             when.method(GET)
-                .path("/data/orders")
+                .path("/orders")
                 .header(POLY_ADDRESS, client.address().to_string().to_lowercase())
                 .header(POLY_API_KEY, API_KEY)
                 .header(POLY_PASSPHRASE, PASSPHRASE)

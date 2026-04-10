@@ -411,7 +411,7 @@ impl<S: State> Client<S> {
 
     /// Unsubscribe from orderbook updates for specific assets.
     ///
-    /// This decrements the reference count for each asset. The server unsubscribe
+    /// This decrements the reference count for each asset. The server unsubscribe request
     /// is only sent when no other subscriptions are using those assets.
     pub fn unsubscribe_orderbook(&self, asset_ids: &[U256]) -> Result<()> {
         self.inner
@@ -422,7 +422,7 @@ impl<S: State> Client<S> {
 
     /// Unsubscribe from price changes for specific assets.
     ///
-    /// This decrements the reference count for each asset. The server unsubscribe
+    /// This decrements the reference count for each asset. The server unsubscribe request
     /// is only sent when no other subscriptions are using those assets.
     pub fn unsubscribe_prices(&self, asset_ids: &[U256]) -> Result<()> {
         self.unsubscribe_orderbook(asset_ids)
@@ -430,7 +430,7 @@ impl<S: State> Client<S> {
 
     /// Unsubscribe from tick size change updates for specific assets.
     ///
-    /// This decrements the reference count for each asset. The server unsubscribe
+    /// This decrements the reference count for each asset. The server unsubscribe request
     /// is only sent when no other subscriptions are using those assets.
     pub fn unsubscribe_tick_size_change(&self, asset_ids: &[U256]) -> Result<()> {
         self.unsubscribe_orderbook(asset_ids)
@@ -438,7 +438,7 @@ impl<S: State> Client<S> {
 
     /// Unsubscribe from midpoint updates for specific assets.
     ///
-    /// This decrements the reference count for each asset. The server unsubscribe
+    /// This decrements the reference count for each asset. The server unsubscribe request
     /// is only sent when no other subscriptions are using those assets.
     pub fn unsubscribe_midpoints(&self, asset_ids: &[U256]) -> Result<()> {
         self.unsubscribe_orderbook(asset_ids)
