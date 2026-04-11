@@ -15,6 +15,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{interval, sleep, timeout};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
+use tokio_util::sync::CancellationToken;
 
 use super::config::Config;
 use super::error::WsError;
@@ -25,36 +26,6 @@ use crate::ws::WithCredentials;
 use crate::{Result, error::Error};
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
-
-/// Broadcast channel capacity for incoming messages.
-const DEFAULT_BROADCAST_CAPACITY: usize = 16_384;
-
-fn broadcast_capacity() -> usize {
-    match std::env::var("POLYMARKET_WS_BROADCAST_CAPACITY") {
-        Ok(raw) => match raw.parse::<usize>() {
-            Ok(capacity) if capacity > 0 => capacity,
-            _ => {
-                #[cfg(feature = "tracing")]
-                tracing::warn!(
-                    value = %raw,
-                    default = DEFAULT_BROADCAST_CAPACITY,
-                    "invalid POLYMARKET_WS_BROADCAST_CAPACITY; using default"
-                );
-                DEFAULT_BROADCAST_CAPACITY
-            }
-        },
-        Err(std::env::VarError::NotPresent) => DEFAULT_BROADCAST_CAPACITY,
-        Err(error) => {
-            #[cfg(feature = "tracing")]
-            tracing::warn!(
-                %error,
-                default = DEFAULT_BROADCAST_CAPACITY,
-                "unable to read POLYMARKET_WS_BROADCAST_CAPACITY; using default"
-            );
-            DEFAULT_BROADCAST_CAPACITY
-        }
-    }
-}
 
 /// Connection state tracking.
 #[non_exhaustive]
@@ -127,6 +98,8 @@ where
     sender_tx: mpsc::Sender<String>,
     /// Broadcast sender for incoming messages
     broadcast_tx: broadcast::Sender<M>,
+    /// Cancellation token for graceful shutdown
+    cancel: CancellationToken,
     /// Phantom data for unused type parameters
     _phantom: PhantomData<P>,
 }
@@ -145,12 +118,14 @@ where
         let (sender_tx, sender_rx) = mpsc::channel(64);
         let (broadcast_tx, _) = broadcast::channel(config.broadcast_capacity);
         let (state_tx, state_rx) = watch::channel(ConnectionState::Disconnected);
+        let cancel = CancellationToken::new();
 
         // Spawn connection task
         let connection_config = config;
         let connection_endpoint = endpoint;
         let broadcast_tx_clone = broadcast_tx.clone();
         let state_tx_clone = state_tx.clone();
+        let cancel_clone = cancel.clone();
 
         tokio::spawn(async move {
             let result = std::panic::AssertUnwindSafe(async move {
@@ -161,6 +136,7 @@ where
                     broadcast_tx_clone,
                     parser,
                     state_tx_clone,
+                    cancel_clone,
                 )
                 .await;
             })
@@ -178,6 +154,7 @@ where
             state_rx,
             sender_tx,
             broadcast_tx,
+            cancel,
             _phantom: PhantomData,
         })
     }
@@ -190,6 +167,7 @@ where
         broadcast_tx: broadcast::Sender<M>,
         parser: P,
         state_tx: watch::Sender<ConnectionState>,
+        cancel: CancellationToken,
     ) {
         let mut attempt = 0_u32;
         let mut backoff: backoff::ExponentialBackoff = config.reconnect.clone().into();
@@ -199,8 +177,8 @@ where
         const MIN_CONNECTION_LIFETIME: std::time::Duration = std::time::Duration::from_secs(5);
 
         loop {
-            // Check if ConnectionManager was dropped (all sender_tx instances gone)
-            if sender_rx.is_closed() {
+            // Check if ConnectionManager was dropped or shutdown requested
+            if cancel.is_cancelled() || sender_rx.is_closed() {
                 #[cfg(feature = "tracing")]
                 tracing::debug!("Sender channel closed, stopping connection loop");
                 _ = state_tx.send(ConnectionState::Disconnected);
@@ -477,5 +455,16 @@ where
     #[must_use]
     pub fn state_receiver(&self) -> watch::Receiver<ConnectionState> {
         self.state_tx.subscribe()
+    }
+
+    /// Request graceful shutdown of the connection loop.
+    pub fn shutdown(&self) {
+        self.cancel.cancel();
+    }
+
+    /// Returns a clone of the cancellation token for external coordination.
+    #[must_use]
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel.clone()
     }
 }

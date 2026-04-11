@@ -349,6 +349,24 @@ pub struct Event {
     pub event_metadata: Option<serde_json::Value>,
 }
 
+/// Fee schedule configuration for a market.
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct FeeSchedule {
+    /// Exponent for fee calculation formula
+    pub exponent: Option<i32>,
+    /// Base fee rate as a decimal (e.g., 0.02 for 2%)
+    #[serde_as(as = "Option<DecimalFromAny>")]
+    pub rate: Option<Decimal>,
+    /// Rebate rate for makers as a decimal
+    #[serde_as(as = "Option<DecimalFromAny>")]
+    pub rebate_rate: Option<Decimal>,
+    /// Whether this fee schedule applies only to takers
+    pub taker_only: Option<bool>,
+}
+
 /// A prediction market.
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder)]
@@ -524,6 +542,8 @@ pub struct Market {
     pub approved: Option<bool>,
     pub cyom: Option<bool>,
     pub fee_type: Option<String>,
+    /// Fee schedule configuration for this market
+    pub fee_schedule: Option<FeeSchedule>,
     pub fees_enabled: Option<bool>,
     pub holding_rewards_enabled: Option<bool>,
     pub neg_risk: Option<bool>,
@@ -541,7 +561,6 @@ pub struct Market {
     pub clob_rewards: Option<Vec<ClobReward>>,
     pub category_mailchimp_tag: Option<String>,
     pub subcategory: Option<String>,
-    pub fee_schedule: Option<serde_json::Value>,
 }
 
 /// CLOB rewards configuration for a market.

@@ -308,13 +308,9 @@ impl SubscriptionManager {
                     }
                     Err(RecvError::Lagged(n)) => {
                         #[cfg(feature = "tracing")]
-                        tracing::error!("Subscription lagged, missed {n} messages — forcing resubscribe");
-                        Err::<(), crate::error::Error>(
-                            WsError::SubscriptionFailed(format!(
-                                "market subscription lagged; missed {n} messages"
-                            ))
-                            .into(),
-                        )?;
+                        tracing::warn!("Market subscription lagged, missed {n} messages");
+                        #[cfg(not(feature = "tracing"))]
+                        let _ = n;
                     }
                     Err(RecvError::Closed) => {
                         break;
@@ -396,13 +392,9 @@ impl SubscriptionManager {
                     }
                     Err(RecvError::Lagged(n)) => {
                         #[cfg(feature = "tracing")]
-                        tracing::error!("Subscription lagged, missed {n} messages — forcing resubscribe");
-                        Err::<(), crate::error::Error>(
-                            WsError::SubscriptionFailed(format!(
-                                "user subscription lagged; missed {n} messages"
-                            ))
-                            .into(),
-                        )?;
+                        tracing::warn!("User subscription lagged, missed {n} messages");
+                        #[cfg(not(feature = "tracing"))]
+                        let _ = n;
                     }
                     Err(RecvError::Closed) => {
                         break;

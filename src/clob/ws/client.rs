@@ -676,6 +676,7 @@ impl Drop for ChannelResources {
         // This allows SubscriptionManager (and its ConnectionManager clone) to drop,
         // which closes sender_tx and signals connection_loop to exit.
         self.reconnection_handle.abort();
+        self.connection.shutdown();
     }
 }
 
