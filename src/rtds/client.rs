@@ -14,6 +14,7 @@ use crate::types::Address;
 use crate::ws::ConnectionManager;
 use crate::ws::config::Config;
 use crate::ws::connection::ConnectionState;
+use crate::ws::task::AbortOnDrop;
 
 /// RTDS (Real-Time Data Socket) client for streaming Polymarket data.
 ///
@@ -65,10 +66,14 @@ struct ClientInner<S: State> {
     connection: ConnectionManager<RtdsMessage, SimpleParser>,
     /// Subscription manager for handling subscriptions
     subscriptions: Arc<SubscriptionManager>,
-    /// Handle to the reconnection handler task. Aborted on drop to break the
-    /// `Arc<SubscriptionManager>` cycle that would otherwise leak the
-    /// `ConnectionManager` and its background tasks.
-    reconnection_handle: tokio::task::JoinHandle<()>,
+    /// Owns the reconnection task spawned by
+    /// [`SubscriptionManager::start_reconnection_handler`]. The wrapper
+    /// aborts the task on drop, which releases the strong
+    /// `Arc<SubscriptionManager>` clone held by the task's future and
+    /// breaks the reference cycle that would otherwise leak the whole
+    /// client (task, WebSocket, subscription manager) for the lifetime
+    /// of the process — see issue #325 and [`AbortOnDrop`].
+    reconnect_handle: AbortOnDrop,
 }
 
 impl Client<Unauthenticated> {
@@ -77,8 +82,10 @@ impl Client<Unauthenticated> {
         let connection = ConnectionManager::new(endpoint.to_owned(), config.clone(), SimpleParser)?;
         let subscriptions = Arc::new(SubscriptionManager::new(connection.clone()));
 
-        // Start reconnection handler to re-subscribe on connection recovery
-        let reconnection_handle = subscriptions.start_reconnection_handler();
+        // Start reconnection handler to re-subscribe on connection recovery.
+        // The handle is retained in an `AbortOnDrop` so the task is
+        // cancelled when the client is dropped — see the field docs.
+        let reconnect_handle = AbortOnDrop::new(subscriptions.start_reconnection_handler());
 
         Ok(Self {
             inner: Arc::new(ClientInner {
@@ -87,7 +94,7 @@ impl Client<Unauthenticated> {
                 endpoint: endpoint.to_owned(),
                 connection,
                 subscriptions,
-                reconnection_handle,
+                reconnect_handle,
             }),
         })
     }
@@ -115,7 +122,7 @@ impl Client<Unauthenticated> {
                 endpoint: inner.endpoint,
                 connection: inner.connection,
                 subscriptions: inner.subscriptions,
-                reconnection_handle: inner.reconnection_handle,
+                reconnect_handle: inner.reconnect_handle,
             }),
         })
     }
@@ -331,18 +338,8 @@ impl Client<Authenticated<Normal>> {
                 endpoint: inner.endpoint,
                 connection: inner.connection,
                 subscriptions: inner.subscriptions,
-                reconnection_handle: inner.reconnection_handle,
+                reconnect_handle: inner.reconnect_handle,
             }),
         })
-    }
-}
-
-impl<S: State> Drop for ClientInner<S> {
-    fn drop(&mut self) {
-        // Abort the reconnection handler to release its Arc<SubscriptionManager>.
-        // This allows SubscriptionManager (and its ConnectionManager clone) to drop,
-        // which closes sender_tx and signals connection_loop to exit.
-        self.reconnection_handle.abort();
-        self.connection.shutdown();
     }
 }

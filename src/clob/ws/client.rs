@@ -20,6 +20,7 @@ use crate::types::{Address, B256, Decimal, U256};
 use crate::ws::ConnectionManager;
 use crate::ws::config::Config;
 use crate::ws::connection::ConnectionState;
+use crate::ws::task::AbortOnDrop;
 
 /// WebSocket client for real-time market data and user updates.
 ///
@@ -644,10 +645,15 @@ impl<S: State> ClientInner<S> {
 struct ChannelResources {
     connection: ConnectionManager<WsMessage, Arc<InterestTracker>>,
     subscriptions: Arc<SubscriptionManager>,
-    /// Handle to the reconnection handler task. Aborted on drop to break the
-    /// `Arc<SubscriptionManager>` cycle that would otherwise leak the
-    /// `ConnectionManager` and its background tasks.
-    reconnection_handle: tokio::task::JoinHandle<()>,
+    /// Owns the reconnection task spawned by
+    /// [`SubscriptionManager::start_reconnection_handler`]. The wrapper
+    /// aborts the task on drop, which releases the strong
+    /// `Arc<SubscriptionManager>` clone held by the task's future and
+    /// breaks the reference cycle that would otherwise leak the whole
+    /// channel (task, WebSocket, subscription manager) for the lifetime
+    /// of the process — see issue #325 and [`AbortOnDrop`].
+    #[expect(dead_code, reason = "Field held only for its Drop side effect")]
+    reconnect_handle: AbortOnDrop,
 }
 
 impl ChannelResources {
@@ -656,27 +662,17 @@ impl ChannelResources {
         let connection = ConnectionManager::new(endpoint, config, Arc::clone(&interest))?;
         let subscriptions = Arc::new(SubscriptionManager::new(connection.clone(), interest));
 
-        let reconnection_handle = subscriptions.start_reconnection_handler();
+        let reconnect_handle = AbortOnDrop::new(subscriptions.start_reconnection_handler());
 
         Ok(Self {
             connection,
             subscriptions,
-            reconnection_handle,
+            reconnect_handle,
         })
     }
 
     fn connection_state(&self) -> ConnectionState {
         self.connection.state()
-    }
-}
-
-impl Drop for ChannelResources {
-    fn drop(&mut self) {
-        // Abort the reconnection handler to release its Arc<SubscriptionManager>.
-        // This allows SubscriptionManager (and its ConnectionManager clone) to drop,
-        // which closes sender_tx and signals connection_loop to exit.
-        self.reconnection_handle.abort();
-        self.connection.shutdown();
     }
 }
 
