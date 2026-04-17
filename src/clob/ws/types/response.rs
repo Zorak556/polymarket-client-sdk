@@ -75,10 +75,11 @@ pub struct BookUpdate {
     /// Unix timestamp in milliseconds
     #[serde_as(as = "DisplayFromStr")]
     pub timestamp: i64,
-    /// Current bid levels (price descending)
+    /// Current bid levels (price ascending — best bid is `bids.last()`).
+    /// See <https://github.com/Polymarket/rs-clob-client/issues/330>.
     #[serde(default)]
     pub bids: Vec<OrderBookLevel>,
-    /// Current ask levels (price ascending)
+    /// Current ask levels (price descending — best ask is `asks.last()`).
     #[serde(default)]
     pub asks: Vec<OrderBookLevel>,
     /// Hash for orderbook validation

@@ -1411,7 +1411,6 @@ impl<K: Kind> Client<Authenticated<K>> {
         not(feature = "heartbeats"),
         expect(
             clippy::unused_async,
-            unused_mut,
             reason = "Nothing to await or modify when heartbeats are disabled"
         )
     )]
@@ -2270,7 +2269,6 @@ impl Client<Authenticated<Normal>> {
         not(feature = "heartbeats"),
         expect(
             clippy::unused_async,
-            unused_mut,
             reason = "Nothing to await or modify when heartbeats are disabled"
         )
     )]
