@@ -488,7 +488,7 @@ mod user_channel {
         // Wait for connections to establish
         sleep(Duration::from_millis(100)).await;
 
-        let stream = client.subscribe_user_events(vec![]).unwrap();
+        let stream = client.subscribe_user_events(vec![]).await.unwrap();
         let mut stream = Box::pin(stream);
 
         // Verify subscription request contains auth
@@ -534,7 +534,7 @@ mod user_channel {
         // Wait for connections to establish
         sleep(Duration::from_millis(100)).await;
 
-        let stream = client.subscribe_user_events(vec![]).unwrap();
+        let stream = client.subscribe_user_events(vec![]).await.unwrap();
         let mut stream = Box::pin(stream);
 
         let _: Option<String> = server.recv_subscription().await;
@@ -582,7 +582,7 @@ mod user_channel {
         // Wait for connections to establish
         sleep(Duration::from_millis(100)).await;
 
-        let stream = client.subscribe_orders(vec![]).unwrap();
+        let stream = client.subscribe_orders(vec![]).await.unwrap();
         let mut stream = Box::pin(stream);
 
         let _: Option<String> = server.recv_subscription().await;
@@ -616,7 +616,7 @@ mod user_channel {
         // Wait for connections to establish
         sleep(Duration::from_millis(100)).await;
 
-        let stream = client.subscribe_trades(vec![]).unwrap();
+        let stream = client.subscribe_trades(vec![]).await.unwrap();
         let mut stream = Box::pin(stream);
 
         let _: Option<String> = server.recv_subscription().await;
@@ -684,7 +684,7 @@ mod user_channel {
         let market = payloads::MARKET;
 
         // Subscribe to user events for a specific market
-        let _stream = client.subscribe_user_events(vec![market]).unwrap();
+        let _stream = client.subscribe_user_events(vec![market]).await.unwrap();
         let _: Option<String> = server.recv_subscription().await;
 
         // Unsubscribe from user events

@@ -2885,13 +2885,13 @@ mod authenticated {
         });
 
         let mut client = create_authenticated(&server).await?;
-        assert!(client.heartbeats_active());
+        assert!(client.heartbeats_active().await);
 
         // Give the first client time to get set up
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let client_clone = client.clone();
-        assert!(client_clone.heartbeats_active());
+        assert!(client_clone.heartbeats_active().await);
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
@@ -2899,17 +2899,17 @@ mod authenticated {
         err.downcast_ref::<Synchronization>().unwrap();
 
         // Retain the heartbeat cancel token and channel on initial error
-        assert!(client.heartbeats_active());
-        assert!(client_clone.heartbeats_active());
+        assert!(client.heartbeats_active().await);
+        assert!(client_clone.heartbeats_active().await);
 
         drop(client_clone);
 
-        assert!(client.heartbeats_active());
+        assert!(client.heartbeats_active().await);
 
         // After dropping the offending client, we should be able to stop heartbeats successfully
         client.stop_heartbeats().await?;
 
-        assert!(!client.heartbeats_active());
+        assert!(!client.heartbeats_active().await);
 
         Ok(())
     }

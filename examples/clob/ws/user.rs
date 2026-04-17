@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Provide specific market IDs, or leave empty for all events
     let markets: Vec<B256> = Vec::new();
-    let mut stream = std::pin::pin!(client.subscribe_user_events(markets)?);
+    let mut stream = std::pin::pin!(client.subscribe_user_events(markets).await?);
     info!(
         endpoint = "subscribe_user_events",
         "subscribed to user events"
